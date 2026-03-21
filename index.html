@@ -444,6 +444,7 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
     <button class="nav-tab" onclick="switchTab('report',this)">📊 統計報告</button>
     <button class="nav-tab" onclick="requestAdminAccess(this)">⚙️ 管理員</button>
   </div>
+  <div id="sync-status" style="font-size:11px;color:var(--gold-light);opacity:0.8;white-space:nowrap"></div>
 </header>
 
 <div class="toast" id="toast"></div>
@@ -458,6 +459,7 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
     </select>
     <button class="btn btn-outline btn-sm" onclick="openAddCourseModal()">＋ 新增個人課程</button>
     <button class="btn btn-gold btn-sm" onclick="window.print()">🖨 列印 A4</button>
+    <button class="btn btn-outline btn-sm" onclick="manualSync()" title="從雲端重新載入最新資料">🔄 同步</button>
   </div>
   <div class="legend">
     <strong style="font-size:12px;color:var(--ink)">說明：</strong>
@@ -579,6 +581,48 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
       <input type="file" id="import-file" style="display:none" accept=".json" onchange="importData(event)">
       <span style="font-size:12px;color:var(--lotus)">資料自動儲存於瀏覽器本機</span>
       <button class="btn btn-red btn-sm" style="margin-left:auto" onclick="clearAll()">⚠ 清除所有資料</button>
+    </div>
+  </div>
+
+  <!-- ── Cloud Sync Setup ── -->
+  <div class="admin-card" style="border-color:#4a90d9;border-width:1.5px">
+    <h3>☁️ 雲端同步設定 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（讓所有裝置共用同一份資料）</span></h3>
+    <div id="cloud-setup-status" style="margin-bottom:12px"></div>
+    <div id="cloud-not-setup">
+      <p style="font-size:13px;color:var(--ink-light);margin-bottom:12px">
+        設定後，管理員報到資料可即時同步到學員手機。<br>
+        請先到 <a href="https://jsonbin.io" target="_blank" style="color:#4a90d9">jsonbin.io</a> 免費註冊，取得 <strong>Master Key</strong>。
+      </p>
+      <div class="form-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div class="form-group" style="flex:1;min-width:200px">
+          <label>JSONBin Master Key</label>
+          <input class="styled-input" id="cloud-master-key" placeholder="$2a$10$..." style="width:100%;font-family:monospace;font-size:12px">
+        </div>
+        <button class="btn btn-primary" onclick="setupCloud()">建立雲端資料庫</button>
+      </div>
+      <div id="cloud-setup-error" style="font-size:12px;color:var(--red);margin-top:8px"></div>
+      <details style="margin-top:12px">
+        <summary style="font-size:12px;color:#aaa;cursor:pointer">已有 Bin ID？點此手動輸入</summary>
+        <div class="form-row" style="margin-top:10px;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group">
+            <label>Bin ID</label>
+            <input class="styled-input" id="cloud-bin-id-manual" placeholder="64abc..." style="width:160px;font-family:monospace;font-size:12px">
+          </div>
+          <div class="form-group" style="flex:1;min-width:180px">
+            <label>Master Key</label>
+            <input class="styled-input" id="cloud-key-manual" placeholder="$2a$10$..." style="width:100%;font-family:monospace;font-size:12px">
+          </div>
+          <button class="btn btn-outline" onclick="manualSetupCloud()">套用</button>
+        </div>
+      </details>
+    </div>
+    <div id="cloud-is-setup" style="display:none">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:13px;color:var(--check)">✅ 雲端已連線</span>
+        <span style="font-size:12px;color:#aaa">Bin ID: <code id="cloud-bin-display" style="font-size:11px"></code></span>
+        <button class="btn btn-outline btn-sm" onclick="manualSync()">🔄 立即同步</button>
+        <button class="btn btn-red btn-sm" style="margin-left:auto" onclick="disconnectCloud()">斷開雲端</button>
+      </div>
     </div>
   </div>
 
@@ -735,16 +779,37 @@ const DEFAULT_STUDENTS = [
 ];
 
 // ════════════════════════════════════════════
-// STATE
-// State shape:
-//   attendance[sid][cid][month] = {
-//     presets:  { [key]: confirmed:bool }   ← preset chips
-//     custom:   [ { id, label, confirmed } ] ← self-added chips
-//   }
+// STATE + CLOUD SYNC (JSONBin.io)
+// All devices share the same data via cloud
 // ════════════════════════════════════════════
-let state = { students:[], globalCourses:[...DEFAULT_COURSES], attendance:{}, personalCourses:{} };
+const JSONBIN_MASTER_KEY = '$2a$10$placeholder'; // will be set after first sync
+const JSONBIN_API = 'https://api.jsonbin.io/v3';
+let BIN_ID = localStorage.getItem('tzu_bin_id') || '';
+let BIN_KEY = localStorage.getItem('tzu_bin_key') || '';
 
-function loadState() {
+let state = { students:[], globalCourses:[...DEFAULT_COURSES], attendance:{}, personalCourses:{} };
+let syncTimer = null;
+let isSyncing = false;
+
+// ── Set credentials (called from admin panel) ──
+function setBinCredentials(binId, binKey) {
+  BIN_ID = binId.trim();
+  BIN_KEY = binKey.trim();
+  localStorage.setItem('tzu_bin_id', BIN_ID);
+  localStorage.setItem('tzu_bin_key', BIN_KEY);
+}
+
+// ── Show sync status ──
+function setSyncStatus(msg, ok) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok === true ? 'var(--check)' : ok === false ? 'var(--red)' : 'var(--lotus)';
+}
+
+// ── Load from cloud, fallback to localStorage ──
+async function loadState() {
+  // Always load localStorage first as instant fallback
   try {
     const s = localStorage.getItem('tzu_chi_2026_v5');
     if (s) {
@@ -754,10 +819,86 @@ function loadState() {
       if (!state.attendance) state.attendance = {};
     }
   } catch(e) {}
+
+  // Then try cloud sync if credentials exist
+  if (BIN_ID && BIN_KEY) {
+    setSyncStatus('⟳ 同步中…', null);
+    try {
+      const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}/latest`, {
+        headers: { 'X-Master-Key': BIN_KEY }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cloud = data.record;
+        if (cloud && cloud.students) {
+          state = cloud;
+          if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
+          if (!state.personalCourses) state.personalCourses = {};
+          if (!state.attendance) state.attendance = {};
+          localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
+          setSyncStatus('✓ 已同步', true);
+        }
+      } else {
+        setSyncStatus('⚠ 同步失敗', false);
+      }
+    } catch(e) {
+      setSyncStatus('⚠ 離線模式', false);
+    }
+  } else {
+    setSyncStatus('⚠ 未設定雲端 — 資料僅存本機', false);
+  }
 }
-function saveState() { localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state)); }
-loadState();
-if (!state.students.length) { state.students = DEFAULT_STUDENTS.map(s=>({...s})); saveState(); }
+
+// ── Save: localStorage immediately + debounced cloud push ──
+function saveState() {
+  localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
+  if (BIN_ID && BIN_KEY) {
+    setSyncStatus('⟳ 儲存中…', null);
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(pushToCloud, 800);
+  }
+}
+
+async function pushToCloud() {
+  if (!BIN_ID || !BIN_KEY) return;
+  isSyncing = true;
+  try {
+    const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': BIN_KEY },
+      body: JSON.stringify(state)
+    });
+    if (res.ok) {
+      setSyncStatus('✓ 已儲存至雲端 ' + new Date().toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}), true);
+    } else {
+      setSyncStatus('⚠ 雲端儲存失敗', false);
+    }
+  } catch(e) {
+    setSyncStatus('⚠ 網路錯誤，已存本機', false);
+  }
+  isSyncing = false;
+}
+
+// ── Create a new bin (first time setup) ──
+async function createNewBin(masterKey) {
+  try {
+    const res = await fetch(`${JSONBIN_API}/b`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': masterKey,
+        'X-Bin-Name': '慈濟志工培訓2026',
+        'X-Bin-Private': 'true'
+      },
+      body: JSON.stringify(state)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.metadata.id;
+    }
+  } catch(e) {}
+  return null;
+}
 
 function genId() { return 'u'+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 
@@ -767,7 +908,6 @@ function cell(sid, cid, m) {
   if (!a[sid]) a[sid] = {};
   if (!a[sid][cid]) a[sid][cid] = {};
   if (!a[sid][cid][m]) a[sid][cid][m] = { presets:{}, custom:[] };
-  // backward compat: if old array format, reset
   if (Array.isArray(a[sid][cid][m])) a[sid][cid][m] = { presets:{}, custom:[] };
   if (!a[sid][cid][m].presets) a[sid][cid][m].presets = {};
   if (!a[sid][cid][m].custom)  a[sid][cid][m].custom  = [];
@@ -1445,7 +1585,7 @@ function editCheckin() {
 // ════════════════════════════════════════════
 // ADMIN
 // ════════════════════════════════════════════
-function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); }
+function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); renderCloudStatus(); }
 
 function renderStudentList() {
   const list = document.getElementById('student-list');
@@ -1568,10 +1708,95 @@ function showToast(msg) {
 }
 
 // ════════════════════════════════════════════
+// CLOUD SETUP UI FUNCTIONS
+// ════════════════════════════════════════════
+function renderCloudStatus() {
+  const notSetup = document.getElementById('cloud-not-setup');
+  const isSetup  = document.getElementById('cloud-is-setup');
+  const display  = document.getElementById('cloud-bin-display');
+  if (!notSetup) return;
+  if (BIN_ID && BIN_KEY) {
+    notSetup.style.display = 'none';
+    isSetup.style.display = 'block';
+    if (display) display.textContent = BIN_ID;
+  } else {
+    notSetup.style.display = 'block';
+    isSetup.style.display = 'none';
+  }
+}
+
+async function setupCloud() {
+  const masterKey = document.getElementById('cloud-master-key').value.trim();
+  const errEl = document.getElementById('cloud-setup-error');
+  errEl.textContent = '';
+  if (!masterKey) { errEl.textContent = '請輸入 Master Key'; return; }
+  errEl.textContent = '⟳ 建立中…';
+  const binId = await createNewBin(masterKey);
+  if (binId) {
+    setBinCredentials(binId, masterKey);
+    renderCloudStatus();
+    errEl.textContent = '';
+    showToast('✅ 雲端資料庫建立成功！Bin ID: ' + binId);
+    setSyncStatus('✓ 雲端已連線', true);
+  } else {
+    errEl.textContent = '建立失敗，請確認 Master Key 是否正確';
+  }
+}
+
+function manualSetupCloud() {
+  const binId  = document.getElementById('cloud-bin-id-manual').value.trim();
+  const binKey = document.getElementById('cloud-key-manual').value.trim();
+  if (!binId || !binKey) { showToast('請填寫 Bin ID 和 Master Key'); return; }
+  setBinCredentials(binId, binKey);
+  renderCloudStatus();
+  manualSync();
+  showToast('✅ 雲端設定已儲存');
+}
+
+function disconnectCloud() {
+  if (!confirm('確定斷開雲端？之後資料只存本機，無法跨裝置同步。')) return;
+  BIN_ID = ''; BIN_KEY = '';
+  localStorage.removeItem('tzu_bin_id');
+  localStorage.removeItem('tzu_bin_key');
+  renderCloudStatus();
+  setSyncStatus('⚠ 未設定雲端 — 資料僅存本機', false);
+  showToast('已斷開雲端連線');
+}
+
+async function manualSync() {
+  if (!BIN_ID || !BIN_KEY) { showToast('尚未設定雲端，請先至管理員設定'); return; }
+  setSyncStatus('⟳ 同步中…', null);
+  try {
+    const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}/latest`, {
+      headers: { 'X-Master-Key': BIN_KEY }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const cloud = data.record;
+      if (cloud && cloud.students) {
+        state = cloud;
+        if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
+        if (!state.personalCourses) state.personalCourses = {};
+        if (!state.attendance) state.attendance = {};
+        localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
+        syncSelects();
+        renderAttendance();
+        setSyncStatus('✓ 已同步 ' + new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}), true);
+        showToast('✓ 已從雲端同步最新資料');
+      }
+    } else { setSyncStatus('⚠ 同步失敗', false); }
+  } catch(e) { setSyncStatus('⚠ 網路錯誤', false); }
+}
+
+// ════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════
-syncSelects();
-renderAdmin();
+(async () => {
+  await loadState();
+  if (!state.students.length) { state.students = DEFAULT_STUDENTS.map(s=>({...s})); saveState(); }
+  syncSelects();
+  renderAdmin();
+})();
 </script>
 </body>
 </html>
