@@ -586,42 +586,31 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
 
   <!-- ── Cloud Sync Setup ── -->
   <div class="admin-card" style="border-color:#4a90d9;border-width:1.5px">
-    <h3>☁️ 雲端同步設定 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（讓所有裝置共用同一份資料）</span></h3>
-    <div id="cloud-setup-status" style="margin-bottom:12px"></div>
+    <h3>☁️ 雲端同步設定 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（管理員設定 Master Key 後即可同步資料至所有裝置）</span></h3>
+    <div id="cloud-setup-status" style="margin-bottom:10px;font-size:12px;color:var(--lotus)">
+      Bin ID：<code style="font-size:11px;background:#f0ebe0;padding:2px 6px;border-radius:4px">69be97acb7ec241ddc8bfcc1</code>
+      （已內建，學員手機開啟即自動讀取）
+    </div>
     <div id="cloud-not-setup">
-      <p style="font-size:13px;color:var(--ink-light);margin-bottom:12px">
-        設定後，管理員報到資料可即時同步到學員手機。<br>
-        請先到 <a href="https://jsonbin.io" target="_blank" style="color:#4a90d9">jsonbin.io</a> 免費註冊，取得 <strong>Master Key</strong>。
-      </p>
       <div class="form-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
-        <div class="form-group" style="flex:1;min-width:200px">
-          <label>JSONBin Master Key</label>
-          <input class="styled-input" id="cloud-master-key" placeholder="$2a$10$..." style="width:100%;font-family:monospace;font-size:12px">
+        <div class="form-group" style="flex:1;min-width:220px">
+          <label>Master Key（管理員寫入用，學員不需要）</label>
+          <input class="styled-input" id="cloud-master-key-input" placeholder="$2a$10$..." style="width:100%;font-family:monospace;font-size:12px"
+            value="${BIN_KEY}">
         </div>
-        <button class="btn btn-primary" onclick="setupCloud()">建立雲端資料庫</button>
+        <button class="btn btn-primary" onclick="saveMasterKey()">儲存 Master Key</button>
       </div>
       <div id="cloud-setup-error" style="font-size:12px;color:var(--red);margin-top:8px"></div>
-      <details style="margin-top:12px">
-        <summary style="font-size:12px;color:#aaa;cursor:pointer">已有 Bin ID？點此手動輸入</summary>
-        <div class="form-row" style="margin-top:10px;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div class="form-group">
-            <label>Bin ID</label>
-            <input class="styled-input" id="cloud-bin-id-manual" placeholder="64abc..." style="width:160px;font-family:monospace;font-size:12px">
-          </div>
-          <div class="form-group" style="flex:1;min-width:180px">
-            <label>Master Key</label>
-            <input class="styled-input" id="cloud-key-manual" placeholder="$2a$10$..." style="width:100%;font-family:monospace;font-size:12px">
-          </div>
-          <button class="btn btn-outline" onclick="manualSetupCloud()">套用</button>
-        </div>
-      </details>
+      <p style="font-size:11px;color:#aaa;margin-top:8px">
+        Master Key 來自 jsonbin.io → 右上角頭像 → API Keys。<br>
+        儲存後管理員的所有報到動作會即時推送至雲端，學員按「🔄 同步」即可看到。
+      </p>
     </div>
     <div id="cloud-is-setup" style="display:none">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span style="font-size:13px;color:var(--check)">✅ 雲端已連線</span>
-        <span style="font-size:12px;color:#aaa">Bin ID: <code id="cloud-bin-display" style="font-size:11px"></code></span>
+        <span style="font-size:13px;color:var(--check)">✅ 雲端已連線，Master Key 已設定</span>
         <button class="btn btn-outline btn-sm" onclick="manualSync()">🔄 立即同步</button>
-        <button class="btn btn-red btn-sm" style="margin-left:auto" onclick="disconnectCloud()">斷開雲端</button>
+        <button class="btn btn-red btn-sm" style="margin-left:auto" onclick="clearMasterKey()">清除 Master Key</button>
       </div>
     </div>
   </div>
@@ -780,36 +769,35 @@ const DEFAULT_STUDENTS = [
 
 // ════════════════════════════════════════════
 // STATE + CLOUD SYNC (JSONBin.io)
-// All devices share the same data via cloud
+// Public bin — anyone can READ without key
+// Only WRITE requires Master Key (admin only)
 // ════════════════════════════════════════════
-const JSONBIN_MASTER_KEY = '$2a$10$placeholder'; // will be set after first sync
-const JSONBIN_API = 'https://api.jsonbin.io/v3';
-let BIN_ID = localStorage.getItem('tzu_bin_id') || '';
+const JSONBIN_API  = 'https://api.jsonbin.io/v3';
+const HARDCODED_BIN_ID = '69be97acb7ec241ddc8bfcc1'; // Stella's bin
+
+// BIN_ID: use hardcoded, localStorage is just a fallback for future override
+let BIN_ID  = HARDCODED_BIN_ID;
 let BIN_KEY = localStorage.getItem('tzu_bin_key') || '';
 
 let state = { students:[], globalCourses:[...DEFAULT_COURSES], attendance:{}, personalCourses:{} };
 let syncTimer = null;
 let isSyncing = false;
 
-// ── Set credentials (called from admin panel) ──
 function setBinCredentials(binId, binKey) {
-  BIN_ID = binId.trim();
-  BIN_KEY = binKey.trim();
-  localStorage.setItem('tzu_bin_id', BIN_ID);
-  localStorage.setItem('tzu_bin_key', BIN_KEY);
+  if (binId) { BIN_ID = binId.trim(); localStorage.setItem('tzu_bin_id', BIN_ID); }
+  if (binKey) { BIN_KEY = binKey.trim(); localStorage.setItem('tzu_bin_key', BIN_KEY); }
 }
 
-// ── Show sync status ──
 function setSyncStatus(msg, ok) {
   const el = document.getElementById('sync-status');
   if (!el) return;
   el.textContent = msg;
-  el.style.color = ok === true ? 'var(--check)' : ok === false ? 'var(--red)' : 'var(--lotus)';
+  el.style.color = ok === true ? '#7ec88a' : ok === false ? '#e88' : '#f0deb4';
 }
 
-// ── Load from cloud, fallback to localStorage ──
+// ── Load: localStorage first (instant), then cloud (fresh) ──
 async function loadState() {
-  // Always load localStorage first as instant fallback
+  // 1. Load localStorage immediately so UI is not blank
   try {
     const s = localStorage.getItem('tzu_chi_2026_v5');
     if (s) {
@@ -820,66 +808,111 @@ async function loadState() {
     }
   } catch(e) {}
 
-  // Then try cloud sync if credentials exist
-  if (BIN_ID && BIN_KEY) {
-    setSyncStatus('⟳ 同步中…', null);
-    try {
-      const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}/latest`, {
-        headers: { 'X-Master-Key': BIN_KEY }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const cloud = data.record;
-        if (cloud && cloud.students) {
-          state = cloud;
-          if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
-          if (!state.personalCourses) state.personalCourses = {};
-          if (!state.attendance) state.attendance = {};
-          localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
-          setSyncStatus('✓ 已同步', true);
-        }
+  // 2. Always fetch from cloud (Public bin — no key needed for GET)
+  setSyncStatus('⟳ 同步中…', null);
+  try {
+    const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}/latest`, {
+      headers: { 'X-Bin-Meta': 'false' }  // skip metadata, just get record
+    });
+    if (res.ok) {
+      const data = await res.json();
+      // JSONBin v3 returns { record: {...}, metadata: {...} }
+      const cloud = data.record || data;
+      if (cloud && cloud.students) {
+        state = cloud;
+        if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
+        if (!state.personalCourses) state.personalCourses = {};
+        if (!state.attendance) state.attendance = {};
+        localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
+        setSyncStatus('✓ 已同步', true);
       } else {
-        setSyncStatus('⚠ 同步失敗', false);
+        // Cloud bin is empty/init — push current state up
+        setSyncStatus('✓ 雲端已連線', true);
+        if (BIN_KEY) pushToCloud();
       }
-    } catch(e) {
-      setSyncStatus('⚠ 離線模式', false);
+    } else {
+      setSyncStatus('⚠ 同步失敗 (' + res.status + ')', false);
     }
-  } else {
-    setSyncStatus('⚠ 未設定雲端 — 資料僅存本機', false);
+  } catch(e) {
+    setSyncStatus('⚠ 離線，使用本機資料', false);
   }
 }
 
-// ── Save: localStorage immediately + debounced cloud push ──
+// ── Save: localStorage immediately + push to cloud ──
 function saveState() {
   localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
-  if (BIN_ID && BIN_KEY) {
+  if (BIN_KEY) {
     setSyncStatus('⟳ 儲存中…', null);
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(pushToCloud, 800);
+    syncTimer = setTimeout(pushToCloud, 600);
+  } else {
+    setSyncStatus('⚠ 未設定 Master Key — 資料僅存本機', false);
   }
 }
 
+// ── Push to cloud (requires Master Key) ──
 async function pushToCloud() {
-  if (!BIN_ID || !BIN_KEY) return;
+  if (!BIN_KEY) {
+    setSyncStatus('⚠ 需要 Master Key 才能同步至雲端', false);
+    return;
+  }
   isSyncing = true;
   try {
     const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': BIN_KEY },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': BIN_KEY,
+        'X-Bin-Versioning': 'false'
+      },
       body: JSON.stringify(state)
     });
     if (res.ok) {
-      setSyncStatus('✓ 已儲存至雲端 ' + new Date().toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}), true);
+      const t = new Date().toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'});
+      setSyncStatus('✓ 已同步至雲端 ' + t, true);
     } else {
-      setSyncStatus('⚠ 雲端儲存失敗', false);
+      const txt = await res.text();
+      setSyncStatus('⚠ 雲端寫入失敗 (' + res.status + ')', false);
+      console.error('Push failed:', txt);
     }
   } catch(e) {
-    setSyncStatus('⚠ 網路錯誤，已存本機', false);
+    setSyncStatus('⚠ 網路錯誤', false);
   }
   isSyncing = false;
 }
 
-// ── Create a new bin (first time setup) ──
+// ── Manual sync button ──
+async function manualSync() {
+  setSyncStatus('⟳ 同步中…', null);
+  try {
+    const res = await fetch(`${JSONBIN_API}/b/${BIN_ID}/latest`, {
+      headers: { 'X-Bin-Meta': 'false' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const cloud = data.record || data;
+      if (cloud && cloud.students) {
+        state = cloud;
+        if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
+        if (!state.personalCourses) state.personalCourses = {};
+        if (!state.attendance) state.attendance = {};
+        localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
+        syncSelects();
+        renderAttendance();
+        setSyncStatus('✓ 已同步 ' + new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}), true);
+        showToast('✓ 已從雲端同步最新資料');
+      }
+    } else {
+      setSyncStatus('⚠ 同步失敗 (' + res.status + ')', false);
+      showToast('同步失敗，請稍後再試');
+    }
+  } catch(e) {
+    setSyncStatus('⚠ 網路錯誤', false);
+    showToast('網路錯誤，請檢查連線');
+  }
+}
+
+// ── Create new bin (admin setup) ──
 async function createNewBin(masterKey) {
   try {
     const res = await fetch(`${JSONBIN_API}/b`, {
@@ -887,17 +920,16 @@ async function createNewBin(masterKey) {
       headers: {
         'Content-Type': 'application/json',
         'X-Master-Key': masterKey,
-        'X-Bin-Name': '慈濟志工培訓2026',
-        'X-Bin-Private': 'true'
+        'X-Bin-Name': 'tzu2026',
+        'X-Bin-Private': 'false'
       },
       body: JSON.stringify(state)
     });
-    if (res.ok) {
-      const data = await res.json();
-      return data.metadata.id;
-    }
-  } catch(e) {}
-  return null;
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch(e) { return null; }
+    if (res.ok && data.metadata?.id) return data.metadata.id;
+    return null;
+  } catch(e) { return null; }
 }
 
 function genId() { return 'u'+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
@@ -1713,54 +1745,39 @@ function showToast(msg) {
 function renderCloudStatus() {
   const notSetup = document.getElementById('cloud-not-setup');
   const isSetup  = document.getElementById('cloud-is-setup');
-  const display  = document.getElementById('cloud-bin-display');
   if (!notSetup) return;
-  if (BIN_ID && BIN_KEY) {
+  if (BIN_KEY) {
     notSetup.style.display = 'none';
-    isSetup.style.display = 'block';
-    if (display) display.textContent = BIN_ID;
+    isSetup.style.display  = 'block';
   } else {
     notSetup.style.display = 'block';
-    isSetup.style.display = 'none';
+    isSetup.style.display  = 'none';
   }
+  // pre-fill input if key exists
+  const inp = document.getElementById('cloud-master-key-input');
+  if (inp && BIN_KEY) inp.value = BIN_KEY;
 }
 
-async function setupCloud() {
-  const masterKey = document.getElementById('cloud-master-key').value.trim();
-  const errEl = document.getElementById('cloud-setup-error');
-  errEl.textContent = '';
-  if (!masterKey) { errEl.textContent = '請輸入 Master Key'; return; }
-  errEl.textContent = '⟳ 建立中…';
-  const binId = await createNewBin(masterKey);
-  if (binId) {
-    setBinCredentials(binId, masterKey);
-    renderCloudStatus();
-    errEl.textContent = '';
-    showToast('✅ 雲端資料庫建立成功！Bin ID: ' + binId);
-    setSyncStatus('✓ 雲端已連線', true);
-  } else {
-    errEl.textContent = '建立失敗，請確認 Master Key 是否正確';
-  }
-}
-
-function manualSetupCloud() {
-  const binId  = document.getElementById('cloud-bin-id-manual').value.trim();
-  const binKey = document.getElementById('cloud-key-manual').value.trim();
-  if (!binId || !binKey) { showToast('請填寫 Bin ID 和 Master Key'); return; }
-  setBinCredentials(binId, binKey);
+function saveMasterKey() {
+  const key = document.getElementById('cloud-master-key-input').value.trim();
+  const err = document.getElementById('cloud-setup-error');
+  if (!key) { err.textContent = '請輸入 Master Key'; return; }
+  if (!key.startsWith('$2a$')) { err.textContent = 'Master Key 格式不正確，應以 $2a$ 開頭'; return; }
+  err.textContent = '';
+  BIN_KEY = key;
+  localStorage.setItem('tzu_bin_key', BIN_KEY);
   renderCloudStatus();
-  manualSync();
-  showToast('✅ 雲端設定已儲存');
+  showToast('✅ Master Key 已儲存，正在推送資料至雲端…');
+  pushToCloud();
 }
 
-function disconnectCloud() {
-  if (!confirm('確定斷開雲端？之後資料只存本機，無法跨裝置同步。')) return;
-  BIN_ID = ''; BIN_KEY = '';
-  localStorage.removeItem('tzu_bin_id');
+function clearMasterKey() {
+  if (!confirm('清除 Master Key 後，此裝置將無法推送資料至雲端（仍可讀取）。確定？')) return;
+  BIN_KEY = '';
   localStorage.removeItem('tzu_bin_key');
   renderCloudStatus();
-  setSyncStatus('⚠ 未設定雲端 — 資料僅存本機', false);
-  showToast('已斷開雲端連線');
+  setSyncStatus('⚠ Master Key 已清除，資料僅存本機', false);
+  showToast('已清除 Master Key');
 }
 
 async function manualSync() {
