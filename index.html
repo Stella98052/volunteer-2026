@@ -267,6 +267,42 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
   background: var(--cream); border-radius: 7px; border: 1px solid var(--mist); flex-wrap: wrap;
 }
 
+/* ── Admin check-in grid ── */
+.checkin-grid {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.checkin-month-group { margin-bottom: 6px; }
+.checkin-month-label {
+  font-family: 'Noto Serif TC', serif; font-size: 13px; font-weight: 600;
+  color: var(--ink-light); margin-bottom: 6px; padding: 4px 0;
+  border-bottom: 1px solid var(--mist); display: flex; align-items: center; gap: 8px;
+}
+.checkin-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0; }
+.checkin-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  transition: all 0.15s; border: 1.5px solid var(--border);
+  background: #f8f7f4; user-select: none;
+  min-width: 160px;
+}
+.checkin-chip:hover { border-color: var(--check); background: #f0f7f2; }
+.checkin-chip.confirmed { border-color: var(--check); background: var(--check-light); }
+.checkin-chip .cc-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ddd; flex-shrink: 0; transition: background 0.15s;
+}
+.checkin-chip.confirmed .cc-dot { background: var(--check); }
+.checkin-chip .cc-info { flex: 1; }
+.checkin-chip .cc-date { font-size: 12px; font-weight: 600; color: var(--grey-date); display: block; }
+.checkin-chip.confirmed .cc-date { color: var(--ink); }
+.checkin-chip .cc-course { font-size: 10px; color: #bbb; display: block; margin-top: 1px; }
+.checkin-chip.confirmed .cc-course { color: var(--check); }
+.checkin-chip .cc-check {
+  font-size: 16px; color: var(--check); opacity: 0;
+  transition: opacity 0.15s; flex-shrink: 0;
+}
+.checkin-chip.confirmed .cc-check { opacity: 1; }
+
 /* ── Modal ── */
 .modal-bg {
   display: none; position: fixed; inset: 0;
@@ -370,6 +406,32 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
 <!-- ══ ADMIN ══ -->
 <div class="panel" id="panel-admin">
   <div class="section-title">管理員設定</div>
+
+  <!-- ── Admin Check-in ── -->
+  <div class="admin-card" style="border-color:var(--gold);border-width:2px">
+    <h3>✅ 管理員代為報到 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（選課程 → 選日期 → 為學員報到）</span></h3>
+    <div class="form-row" style="margin-bottom:14px;align-items:flex-end;gap:14px;flex-wrap:wrap">
+      <div class="form-group">
+        <label>選擇課程</label>
+        <select class="styled-select" id="checkin-course" onchange="renderCheckinDates()" style="width:200px">
+          <option value="">-- 請選擇課程 --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>選擇日期</label>
+        <select class="styled-select" id="checkin-date" onchange="renderCheckinStudents()" style="width:200px">
+          <option value="">-- 請先選擇課程 --</option>
+        </select>
+      </div>
+      <div id="checkin-bulk-btns" style="display:none;gap:8px" >
+        <button class="btn btn-green btn-sm" onclick="checkInAll()">✓ 全員出席</button>
+      </div>
+    </div>
+    <div id="checkin-grid">
+      <div style="color:#bbb;font-size:13px;padding:12px 0">請先選擇課程和日期</div>
+    </div>
+  </div>
+
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
     <div class="admin-card">
       <h3>👥 學員管理</h3>
@@ -454,7 +516,7 @@ const MONTHS_ZH = {2:'二月',3:'三月',4:'四月',5:'五月',6:'六月',
 // key   = stored in state (short form keeps storage tidy)
 const PRESET_DATES = {
   'c02': { // 委員慈誠精進日（含精進半日、大型精進日）
-    2:  [{ key:'c02-2-1',  label:'2/22(日)\n精進半日' }],
+    2:  [{ key:'c02-2-1',  label:'2/1(日)\n精進半日' }],
     3:  [{ key:'c02-3-1',  label:'3/1(日)\n大型精進日' }],
     4:  [{ key:'c02-4-1',  label:'4月待定\n精進半日' }],
     5:  [{ key:'c02-5-1',  label:'5月待定\n精進半日' }],
@@ -508,8 +570,17 @@ const PRESET_DATES = {
 };
 
 const DEFAULT_COURSES = [
-  { id:'c01', name:'協力聯誼',        group:'協力組' },
+  // ── 預定排程課程（有預設日期，放最上方方便手機操作）──
   { id:'c02', name:'委員慈誠精進日',  group:'全體', note:'含精進半日、大型精進日' },
+  { id:'c20', name:'和氣課程',        group:'和氣組' },
+  { id:'c21', name:'合心課程',        group:'合心組' },
+  { id:'c22', name:'醫院志工初階課',  group:'協力組' },
+  { id:'c23', name:'浴佛節',          group:'全體' },
+  { id:'c24', name:'授證評量',        group:'全體' },
+  { id:'c25', name:'花蓮尋根',        group:'全體' },
+  { id:'c26', name:'授證入經藏/手語', group:'協力組/活動組' },
+  // ── 日常付出課程 ──
+  { id:'c01', name:'協力聯誼',        group:'協力組' },
   { id:'c03', name:'薰法香',          group:'全體' },
   { id:'c04', name:'志工早會',        group:'全體' },
   { id:'c05', name:'各功能共修',      group:'全體' },
@@ -527,13 +598,6 @@ const DEFAULT_COURSES = [
   { id:'c17', name:'環保',            group:'環保組' },
   { id:'c18', name:'福田志工',        group:'全體' },
   { id:'c19', name:'人文真善美',      group:'人文組' },
-  { id:'c20', name:'和氣課程',        group:'和氣組' },
-  { id:'c21', name:'合心課程',        group:'合心組' },
-  { id:'c22', name:'醫院志工初階課',  group:'協力組' },
-  { id:'c23', name:'浴佛節',          group:'全體' },
-  { id:'c24', name:'授證評量',        group:'全體' },
-  { id:'c25', name:'花蓮尋根',        group:'全體' },
-  { id:'c26', name:'授證入經藏/手語', group:'協力組/活動組' },
 ];
 
 const DEFAULT_STUDENTS = [
@@ -555,7 +619,7 @@ let state = { students:[], globalCourses:[...DEFAULT_COURSES], attendance:{}, pe
 
 function loadState() {
   try {
-    const s = localStorage.getItem('tzu_chi_2026_v4');
+    const s = localStorage.getItem('tzu_chi_2026_v5');
     if (s) {
       state = JSON.parse(s);
       if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
@@ -564,7 +628,7 @@ function loadState() {
     }
   } catch(e) {}
 }
-function saveState() { localStorage.setItem('tzu_chi_2026_v4', JSON.stringify(state)); }
+function saveState() { localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state)); }
 loadState();
 if (!state.students.length) { state.students = DEFAULT_STUDENTS.map(s=>({...s})); saveState(); }
 
@@ -612,6 +676,14 @@ function syncSelects() {
     sel.innerHTML = '<option value="">-- 請選擇學員 --</option>' +
       state.students.map(s=>`<option value="${s.id}" ${s.id===cur?'selected':''}>${s.name}｜${s.group}｜組長:${s.leader||'—'}</option>`).join('');
   });
+  // Populate checkin course dropdown
+  const cc = document.getElementById('checkin-course');
+  if (cc) {
+    const cur = cc.value;
+    const coursesWithPresets = state.globalCourses.filter(c => Object.keys(PRESET_DATES[c.id]||{}).length > 0);
+    cc.innerHTML = '<option value="">-- 請選擇課程 --</option>' +
+      coursesWithPresets.map(c=>`<option value="${c.id}" ${c.id===cur?'selected':''}>${c.name}</option>`).join('');
+  }
 }
 
 function getCourses(sid) {
@@ -629,13 +701,33 @@ function renderAttendance() {
   const student = state.students.find(s=>s.id===sid);
   const courses  = getCourses(sid);
 
-  // Count confirmed
-  let totalConf = 0;
-  courses.forEach(c => MONTHS.forEach(m => {
-    const d = cell(sid, c.id, m);
-    totalConf += Object.values(d.presets).filter(Boolean).length;
-    totalConf += d.custom.filter(x=>x.confirmed).length;
-  }));
+  // Count stats — 3 separate buckets:
+  // schedTotal  = total preset chips across all scheduled courses (安排總堂數)
+  // schedConf   = confirmed preset chips only (出席堂數，不含自填)
+  // personalConf = all confirmed in personal courses + all confirmed custom dates anywhere
+  const personalCourseIds = new Set((state.personalCourses[sid]||[]).map(c=>c.id));
+  let schedTotal = 0;   // 預定課程總堂數
+  let schedConf  = 0;   // 預定課程出席堂數（只算 preset confirmed）
+  let personalConf = 0; // 自選課程出席堂數（個人課程列 + 所有列的自填日期）
+
+  courses.forEach(c => {
+    const presetDefs = PRESET_DATES[c.id] || {};
+    MONTHS.forEach(m => {
+      const d = cell(sid, c.id, m);
+      const monthPresets = (presetDefs[m] || []);
+
+      if (personalCourseIds.has(c.id)) {
+        // Personal course row: everything counts as personal
+        personalConf += Object.values(d.presets).filter(Boolean).length;
+        personalConf += d.custom.filter(x=>x.confirmed).length;
+      } else {
+        // Scheduled course row
+        schedTotal += monthPresets.length;                                    // total preset slots
+        schedConf  += monthPresets.filter(pd => d.presets[pd.key]).length;   // confirmed presets only
+        personalConf += d.custom.filter(x=>x.confirmed).length;              // self-added dates → personal bucket
+      }
+    });
+  });
 
   let html = `
   <div class="print-header">
@@ -646,8 +738,9 @@ function renderAttendance() {
     <div class="stat-card"><div class="stat-num">${student.name.replace('師姊','')}</div><div class="stat-label">學員</div></div>
     <div class="stat-card"><div class="stat-num">${student.group}</div><div class="stat-label">組別</div></div>
     <div class="stat-card"><div class="stat-num">${student.leader||'—'}</div><div class="stat-label">帶領組長</div></div>
-    <div class="stat-card"><div class="stat-num">${totalConf}</div><div class="stat-label">已確認出席次數</div></div>
-    <div class="stat-card"><div class="stat-num">${courses.length}</div><div class="stat-label">課程項目數</div></div>
+    <div class="stat-card" style="border-color:#aaa"><div class="stat-num" style="color:#888">${schedTotal}</div><div class="stat-label">預定課程總堂數</div></div>
+    <div class="stat-card" style="border-color:var(--check)"><div class="stat-num">${schedConf}</div><div class="stat-label">預定課程出席堂數</div></div>
+    <div class="stat-card" style="border-color:var(--lotus)"><div class="stat-num" style="color:var(--lotus)">${personalConf}</div><div class="stat-label">自選課程出席堂數</div></div>
   </div>
   <div class="table-wrap"><table class="main-tbl">
   <thead><tr>
@@ -780,15 +873,27 @@ function confirmCustom(btn) {
 // ════════════════════════════════════════════
 function refreshStats(sid) {
   const courses = getCourses(sid);
-  let totalConf = 0;
-  courses.forEach(c => MONTHS.forEach(m => {
-    const d = cell(sid, c.id, m);
-    totalConf += Object.values(d.presets).filter(Boolean).length;
-    totalConf += d.custom.filter(x=>x.confirmed).length;
-  }));
-  // update the stat card showing count (4th card, index 3)
+  const personalCourseIds = new Set((state.personalCourses[sid]||[]).map(c=>c.id));
+  let schedTotal = 0, schedConf = 0, personalConf = 0;
+  courses.forEach(c => {
+    const presetDefs = PRESET_DATES[c.id] || {};
+    MONTHS.forEach(m => {
+      const d = cell(sid, c.id, m);
+      const monthPresets = (presetDefs[m] || []);
+      if (personalCourseIds.has(c.id)) {
+        personalConf += Object.values(d.presets).filter(Boolean).length;
+        personalConf += d.custom.filter(x=>x.confirmed).length;
+      } else {
+        schedTotal += monthPresets.length;
+        schedConf  += monthPresets.filter(pd => d.presets[pd.key]).length;
+        personalConf += d.custom.filter(x=>x.confirmed).length;
+      }
+    });
+  });
   const cards = document.querySelectorAll('#attendance-area .stat-num');
-  if (cards[3]) cards[3].textContent = totalConf;
+  if (cards[3]) cards[3].textContent = schedTotal;
+  if (cards[4]) cards[4].textContent = schedConf;
+  if (cards[5]) cards[5].textContent = personalConf;
 }
 
 // ════════════════════════════════════════════
@@ -801,22 +906,41 @@ function renderReport() {
 
   const student = state.students.find(s=>s.id===sid);
   const courses  = getCourses(sid);
-  let totalConf = 0;
+  const personalCourseIds = new Set((state.personalCourses[sid]||[]).map(c=>c.id));
+  let schedTotal = 0, schedConf = 0, personalConf = 0;
 
   const rows = courses.map(c => {
-    let count = 0;
+    let presetCount = 0, presetConf = 0, customConf = 0;
     const mdata = {};
     MONTHS.forEach(m => {
       const d = cell(sid, c.id, m);
       const presetDefs = (PRESET_DATES[c.id]||{})[m]||[];
       const confPresets = presetDefs.filter(pd => d.presets[pd.key]).map(pd => pd.label.replace('\n',' '));
       const confCustom  = (d.custom||[]).filter(x=>x.confirmed).map(x=>x.label);
+
+      if (personalCourseIds.has(c.id)) {
+        // personal course row — everything counts as personal
+        presetConf += confPresets.length;
+        customConf += confCustom.length;
+      } else {
+        presetCount += presetDefs.length;     // total slots
+        presetConf  += confPresets.length;    // confirmed presets
+        customConf  += confCustom.length;     // self-added → personal bucket
+      }
+
       const all = [...confPresets, ...confCustom];
-      count += all.length;
       if (all.length) mdata[m] = all.join('、');
     });
-    totalConf += count;
-    return { c, count, mdata };
+
+    if (personalCourseIds.has(c.id)) {
+      personalConf += presetConf + customConf;
+    } else {
+      schedTotal += presetCount;
+      schedConf  += presetConf;
+      personalConf += customConf;
+    }
+
+    return { c, presetConf, customConf, count: presetConf + customConf, mdata, isPersonal: personalCourseIds.has(c.id) };
   });
 
   let html = `
@@ -828,8 +952,9 @@ function renderReport() {
     <div class="stat-card"><div class="stat-num">${student.name.replace('師姊','')}</div><div class="stat-label">學員</div></div>
     <div class="stat-card"><div class="stat-num">${student.group}</div><div class="stat-label">組別</div></div>
     <div class="stat-card"><div class="stat-num">${student.leader||'—'}</div><div class="stat-label">帶領組長</div></div>
-    <div class="stat-card"><div class="stat-num">${totalConf}</div><div class="stat-label">總出席次數</div></div>
-    <div class="stat-card"><div class="stat-num">${rows.filter(r=>r.count>0).length}</div><div class="stat-label">有出席課程種類</div></div>
+    <div class="stat-card" style="border-color:#aaa"><div class="stat-num" style="color:#888">${schedTotal}</div><div class="stat-label">預定課程總堂數</div></div>
+    <div class="stat-card" style="border-color:var(--check)"><div class="stat-num">${schedConf}</div><div class="stat-label">預定課程出席堂數</div></div>
+    <div class="stat-card" style="border-color:var(--lotus)"><div class="stat-num" style="color:var(--lotus)">${personalConf}</div><div class="stat-label">自選課程出席堂數</div></div>
   </div>
   <div class="table-wrap"><table class="main-tbl">
   <thead><tr>
@@ -839,24 +964,230 @@ function renderReport() {
     <th class="header-month" style="background:var(--lotus);color:white;min-width:46px;width:46px">合計</th>
   </tr></thead><tbody>`;
 
-  rows.forEach(({c, count, mdata}) => {
+  // ── Scheduled courses (預定課程) ──
+  const schedRows = rows.filter(r => !r.isPersonal);
+  const personalRows = rows.filter(r => r.isPersonal);
+
+  schedRows.forEach(({c, count, mdata}) => {
+    if (count === 0) return;
     html += `<tr class="course-row">
-      <td class="col-item"${count?' style="background:var(--gold-light)"':''}>${c.name}</td>
+      <td class="col-item" style="background:var(--gold-light)">${c.name}</td>
       <td class="col-group">${c.group||''}</td>`;
     MONTHS.forEach(m => {
       const d = mdata[m];
       html += `<td style="padding:4px 5px;font-size:10px;text-align:center;vertical-align:middle;${d?'background:var(--check-light);color:var(--check)':''}">${d||''}</td>`;
     });
-    html += `<td style="text-align:center;font-weight:700;font-size:13px;padding:4px;${count?'color:var(--check)':'color:#ccc'}">${count||'—'}</td></tr>`;
+    html += `<td style="text-align:center;font-weight:700;font-size:13px;padding:4px;color:var(--check)">${count}</td></tr>`;
   });
+
+  // Zero-attendance scheduled courses (collapsed)
+  const zeroRows = schedRows.filter(r=>r.count===0);
+  if (zeroRows.length > 0) {
+    html += `<tr><td colspan="${MONTHS.length+3}" style="padding:6px 12px;background:var(--cream);border-top:2px dashed var(--mist)">
+      <details style="cursor:pointer">
+        <summary style="font-size:12px;color:#bbb;user-select:none">▸ 顯示未出席預定課程（${zeroRows.length} 項）</summary>
+        <table style="width:100%;border-collapse:collapse;margin-top:6px">
+          ${zeroRows.map(({c})=>`<tr>
+            <td style="padding:4px 10px;font-size:12px;color:#bbb;width:105px">${c.name}</td>
+            <td style="padding:4px 6px;font-size:10px;color:#ccc;width:62px">${c.group||''}</td>
+            ${MONTHS.map(()=>`<td style="padding:4px;min-width:110px;width:110px"></td>`).join('')}
+            <td style="text-align:center;color:#ccc;font-size:12px;width:46px">—</td>
+          </tr>`).join('')}
+        </table>
+      </details>
+    </td></tr>`;
+  }
+
+  // ── Scheduled courses monthly totals row (presets only, not custom) ──
+  const monthSchedTotals = {};
+  MONTHS.forEach(m => {
+    let t = 0;
+    schedRows.forEach(({c}) => {
+      const d = cell(sid, c.id, m);
+      t += (PRESET_DATES[c.id]||{})[m]?.filter(pd=>d.presets[pd.key]).length || 0;
+      // custom dates excluded — they go to personal bucket
+    });
+    monthSchedTotals[m] = t;
+  });
+
+  html += `<tr style="background:var(--ink)">
+    <td class="col-item" style="background:var(--ink);color:var(--gold);font-family:'Noto Serif TC',serif;font-weight:700;font-size:11px">預定課程<br>總計堂數</td>
+    <td class="col-group" style="background:var(--ink);color:var(--gold-light);font-size:10px">全年</td>
+    ${MONTHS.map(m=>`<td style="text-align:center;padding:6px 4px;font-weight:700;font-size:13px;${monthSchedTotals[m]?'color:var(--gold)':'color:#444'}">${monthSchedTotals[m]||'—'}</td>`).join('')}
+    <td style="text-align:center;padding:6px 4px;font-weight:800;font-size:16px;color:var(--gold)">${schedConf}</td>
+  </tr>`;
+
+  // ── Personal / custom courses section ──
+  // Always show if there are any personal course rows OR any custom dates anywhere
+  const hasPersonalData = personalRows.length > 0 || personalConf > 0;
+  if (hasPersonalData) {
+    html += `<tr><td colspan="${MONTHS.length+3}" style="padding:8px 14px;background:var(--lotus-light);border-top:3px solid var(--lotus)">
+      <span style="font-family:'Noto Serif TC',serif;font-size:13px;color:var(--lotus);font-weight:600">自選課程記錄</span>
+      <span style="font-size:11px;color:var(--lotus);margin-left:8px">（不計入預定課程總堂數）</span>
+    </td></tr>`;
+
+    personalRows.forEach(({c, count, mdata}) => {
+      if (count === 0) return;
+      html += `<tr class="course-row custom-row">
+        <td class="col-item" style="background:var(--lotus-light);color:var(--lotus)">${c.name}</td>
+        <td class="col-group">${c.group||''}</td>`;
+      MONTHS.forEach(m => {
+        const d = mdata[m];
+        html += `<td style="padding:4px 5px;font-size:10px;text-align:center;vertical-align:middle;${d?'background:#e8d0e8;color:var(--lotus)':''}">${d||''}</td>`;
+      });
+      html += `<td style="text-align:center;font-weight:700;font-size:13px;padding:4px;color:var(--lotus)">${count}</td></tr>`;
+    });
+
+    const monthPersonalTotals = {};
+    MONTHS.forEach(m => {
+      let t = 0;
+      // personal course rows (all confirmed)
+      personalRows.forEach(({c}) => {
+        const d = cell(sid, c.id, m);
+        t += (PRESET_DATES[c.id]||{})[m]?.filter(pd=>d.presets[pd.key]).length || 0;
+        t += (d.custom||[]).filter(x=>x.confirmed).length;
+      });
+      // custom (self-added) dates from scheduled course rows also count as personal
+      schedRows.forEach(({c}) => {
+        const d = cell(sid, c.id, m);
+        t += (d.custom||[]).filter(x=>x.confirmed).length;
+      });
+      monthPersonalTotals[m] = t;
+    });
+
+    html += `<tr style="background:#4a1f4a">
+      <td class="col-item" style="background:#4a1f4a;color:#e8d8ea;font-family:'Noto Serif TC',serif;font-weight:700;font-size:11px">自選課程<br>總計堂數</td>
+      <td class="col-group" style="background:#4a1f4a;color:#d8c6d8;font-size:10px">全年</td>
+      ${MONTHS.map(m=>`<td style="text-align:center;padding:6px 4px;font-weight:700;font-size:13px;${monthPersonalTotals[m]?'color:#e8d8ea':'color:#6a4f6a'}">${monthPersonalTotals[m]||'—'}</td>`).join('')}
+      <td style="text-align:center;padding:6px 4px;font-weight:800;font-size:16px;color:#e8d8ea">${personalConf}</td>
+    </tr>`;
+  }
   html += `</tbody></table></div>`;
   area.innerHTML = html;
 }
 
 // ════════════════════════════════════════════
+// ADMIN CHECK-IN  (課程為主 → 選日期 → 學員報到)
+// ════════════════════════════════════════════
+
+// Step 1: course selected → populate date dropdown
+function renderCheckinDates() {
+  const cid = document.getElementById('checkin-course').value;
+  const dateSel = document.getElementById('checkin-date');
+  const grid = document.getElementById('checkin-grid');
+  const bulkBtns = document.getElementById('checkin-bulk-btns');
+
+  dateSel.innerHTML = '<option value="">-- 請選擇日期 --</option>';
+  grid.innerHTML = '<div style="color:#bbb;font-size:13px;padding:12px 0">請選擇日期</div>';
+  bulkBtns.style.display = 'none';
+
+  if (!cid) { dateSel.innerHTML = '<option value="">-- 請先選擇課程 --</option>'; return; }
+
+  const presetsByMonth = PRESET_DATES[cid] || {};
+  const allPresets = [];
+  MONTHS.forEach(m => {
+    (presetsByMonth[m] || []).forEach(pd => allPresets.push({ m, pd }));
+  });
+
+  if (allPresets.length === 0) {
+    dateSel.innerHTML = '<option value="">（此課程無預設日期）</option>';
+    return;
+  }
+
+  allPresets.forEach(({ m, pd }) => {
+    const opt = document.createElement('option');
+    opt.value = `${m}__${pd.key}`;
+    opt.textContent = pd.label.replace('\n', ' ');
+    dateSel.appendChild(opt);
+  });
+}
+
+// Step 2: date selected → show all students as chips
+function renderCheckinStudents() {
+  const cid = document.getElementById('checkin-course').value;
+  const dateVal = document.getElementById('checkin-date').value;
+  const grid = document.getElementById('checkin-grid');
+  const bulkBtns = document.getElementById('checkin-bulk-btns');
+
+  if (!cid || !dateVal) {
+    grid.innerHTML = '<div style="color:#bbb;font-size:13px;padding:12px 0">請選擇課程和日期</div>';
+    bulkBtns.style.display = 'none';
+    return;
+  }
+
+  const [mStr, pdKey] = dateVal.split('__');
+  const m = parseInt(mStr);
+  const presetDef = (PRESET_DATES[cid]||{})[m]?.find(pd => pd.key === pdKey);
+  if (!presetDef) return;
+
+  bulkBtns.style.display = 'flex';
+
+  const confirmedCount = state.students.filter(s => !!(cell(s.id, cid, m).presets[pdKey])).length;
+
+  let html = `
+  <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-family:'Noto Serif TC',serif;font-size:14px;font-weight:600;color:var(--ink)">
+      ${presetDef.label.replace('\n',' ')}
+    </span>
+    <span style="font-size:12px;color:var(--check);font-weight:500">
+      已報到 ${confirmedCount} / ${state.students.length} 人
+    </span>
+  </div>
+  <div class="checkin-chips">`;
+
+  state.students.forEach(s => {
+    const confirmed = !!(cell(s.id, cid, m).presets[pdKey]);
+    html += `<div class="checkin-chip${confirmed?' confirmed':''}"
+      onclick="toggleCheckinStudent('${s.id}','${cid}',${m},'${pdKey}',this)">
+      <span class="cc-dot"></span>
+      <span class="cc-info">
+        <span class="cc-date" style="font-size:13px">${s.name.replace('師姊','')}<span style="font-size:10px;font-weight:400;color:inherit;opacity:0.7">師姊</span></span>
+        <span class="cc-course">${s.group} ｜ 組長：${s.leader||'—'}</span>
+      </span>
+      <span class="cc-check">✓</span>
+    </div>`;
+  });
+
+  html += `</div>`;
+  grid.innerHTML = html;
+}
+
+function toggleCheckinStudent(sid, cid, m, key, el) {
+  const d = cell(sid, cid, m);
+  d.presets[key] = !d.presets[key];
+  saveCell(sid, cid, m, d);
+  el.classList.toggle('confirmed', d.presets[key]);
+  showToast(d.presets[key] ? `✓ ${state.students.find(s=>s.id===sid)?.name} 已報到` : '已取消報到');
+  // update count
+  const cid2 = document.getElementById('checkin-course').value;
+  const dateVal = document.getElementById('checkin-date').value;
+  if (cid2 && dateVal) {
+    const [mStr, pdKey] = dateVal.split('__');
+    const confirmedCount = state.students.filter(s => !!(cell(s.id, cid2, parseInt(mStr)).presets[pdKey])).length;
+    const countEl = document.querySelector('#checkin-grid span[style*="check"]');
+    if (countEl) countEl.textContent = `已報到 ${confirmedCount} / ${state.students.length} 人`;
+  }
+}
+
+function checkInAll() {
+  const cid = document.getElementById('checkin-course').value;
+  const dateVal = document.getElementById('checkin-date').value;
+  if (!cid || !dateVal) return;
+  const [mStr, pdKey] = dateVal.split('__');
+  const m = parseInt(mStr);
+  state.students.forEach(s => {
+    const d = cell(s.id, cid, m);
+    d.presets[pdKey] = true;
+    saveCell(s.id, cid, m, d);
+  });
+  renderCheckinStudents();
+  showToast(`✓ 已為全體 ${state.students.length} 位學員報到`);
+}
+
+// ════════════════════════════════════════════
 // ADMIN
 // ════════════════════════════════════════════
-function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); }
+function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); renderCheckinDates(); }
 
 function renderStudentList() {
   const list = document.getElementById('student-list');
