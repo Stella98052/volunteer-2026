@@ -303,6 +303,47 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
 }
 .checkin-chip.confirmed .cc-check { opacity: 1; }
 
+/* ── Admin lock screen ── */
+#admin-lock {
+  position: absolute; inset: 0; z-index: 10;
+  background: var(--cream);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 400px;
+}
+.lock-box {
+  background: white; border: 1px solid var(--border);
+  border-radius: 16px; padding: 36px 32px;
+  width: 340px; max-width: 92vw;
+  box-shadow: 0 4px 24px var(--shadow);
+  text-align: center;
+}
+.lock-box h2 {
+  font-family: 'Noto Serif TC', serif; font-size: 20px;
+  color: var(--ink); margin-bottom: 8px;
+}
+.lock-box p { font-size: 13px; color: var(--lotus); margin-bottom: 20px; }
+.lock-box input {
+  width: 100%; padding: 10px 14px; font-size: 15px; text-align: center;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  font-family: 'Noto Sans TC', sans-serif; outline: none; margin-bottom: 10px;
+  letter-spacing: 4px;
+}
+.lock-box input:focus { border-color: var(--gold); }
+.lock-error { font-size: 13px; color: var(--red); margin-top: 8px; min-height: 18px; }
+
+/* ── Checkin action bar ── */
+.checkin-action-bar {
+  display: none; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 14px; padding: 12px 16px;
+  background: var(--cream-dark); border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.checkin-action-bar.visible { display: flex; }
+.checkin-summary { flex: 1; font-size: 13px; color: var(--ink-light); }
+
+/* locked chip — no hover, no cursor */
+.checkin-chip.locked { cursor: default; pointer-events: none; opacity: 0.85; }
+
 /* ── Modal ── */
 .modal-bg {
   display: none; position: fixed; inset: 0;
@@ -328,6 +369,44 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
 }
 .toast.show { opacity: 1; transform: translateY(0); }
 .empty-state { text-align: center; padding: 40px; color: var(--lotus); font-family: 'Noto Serif TC', serif; font-size: 15px; }
+
+/* ── Password lock overlay ── */
+#admin-lock {
+  position: absolute; inset: 0;
+  background: var(--cream); z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 300px;
+}
+.lock-box {
+  background: white; border: 2px solid var(--gold);
+  border-radius: 16px; padding: 36px 40px;
+  text-align: center; box-shadow: 0 8px 32px var(--shadow);
+  max-width: 340px; width: 90%;
+}
+.lock-box h2 { font-family: 'Noto Serif TC', serif; font-size: 18px; color: var(--ink); margin-bottom: 6px; }
+.lock-box p  { font-size: 12px; color: var(--lotus); margin-bottom: 20px; }
+.lock-box input {
+  width: 100%; padding: 10px 14px; font-size: 16px; letter-spacing: 4px;
+  border: 2px solid var(--border); border-radius: 8px; text-align: center;
+  font-family: 'Noto Sans TC', sans-serif; outline: none; margin-bottom: 12px;
+  transition: border 0.2s;
+}
+.lock-box input:focus { border-color: var(--gold); }
+.lock-error { font-size: 12px; color: var(--red); margin-top: 6px; min-height: 18px; }
+
+/* ── Checkin staging ── */
+.checkin-action-bar {
+  display: none; margin-top: 16px; padding: 12px 16px;
+  background: var(--cream-dark); border-radius: 10px;
+  border: 1px solid var(--border);
+  align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.checkin-action-bar.visible { display: flex; }
+.checkin-summary { font-size: 13px; color: var(--ink); flex: 1; }
+.checkin-summary strong { color: var(--check); }
+
+/* ── checkin chip: locked state ── */
+.checkin-chip.locked { pointer-events: none; opacity: 0.85; }
 
 /* ── Print ── */
 @media print {
@@ -363,7 +442,7 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
   <div class="nav-tabs">
     <button class="nav-tab active" onclick="switchTab('attendance',this)">📋 出席記錄</button>
     <button class="nav-tab" onclick="switchTab('report',this)">📊 統計報告</button>
-    <button class="nav-tab" onclick="switchTab('admin',this)">⚙️ 管理員</button>
+    <button class="nav-tab" onclick="requestAdminAccess(this)">⚙️ 管理員</button>
   </div>
 </header>
 
@@ -404,12 +483,30 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
 </div>
 
 <!-- ══ ADMIN ══ -->
-<div class="panel" id="panel-admin">
-  <div class="section-title">管理員設定</div>
+<div class="panel" id="panel-admin" style="position:relative;min-height:400px">
+
+  <!-- Lock overlay (shown until password entered) -->
+  <div id="admin-lock">
+    <div class="lock-box">
+      <div style="font-size:36px;margin-bottom:12px">🔐</div>
+      <h2>管理員登入</h2>
+      <p>請輸入管理員密碼才能進入此頁面</p>
+      <input type="password" id="admin-pw-input" placeholder="輸入密碼"
+        onkeydown="if(event.key==='Enter')checkAdminPw()">
+      <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="checkAdminPw()">確認登入</button>
+      <div class="lock-error" id="pw-error"></div>
+    </div>
+  </div>
+
+  <!-- Admin content (hidden behind lock) -->
+  <div id="admin-content" style="display:none">
+  <div class="section-title">管理員設定
+    <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:11px" onclick="lockAdmin()">🔒 登出管理員</button>
+  </div>
 
   <!-- ── Admin Check-in ── -->
   <div class="admin-card" style="border-color:var(--gold);border-width:2px">
-    <h3>✅ 管理員代為報到 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（選課程 → 選日期 → 為學員報到）</span></h3>
+    <h3>✅ 管理員代為報到 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（選課程 → 選日期 → 勾選學員 → 完成報到）</span></h3>
     <div class="form-row" style="margin-bottom:14px;align-items:flex-end;gap:14px;flex-wrap:wrap">
       <div class="form-group">
         <label>選擇課程</label>
@@ -423,12 +520,18 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
           <option value="">-- 請先選擇課程 --</option>
         </select>
       </div>
-      <div id="checkin-bulk-btns" style="display:none;gap:8px" >
+      <div id="checkin-bulk-btns" style="display:none;gap:8px">
         <button class="btn btn-green btn-sm" onclick="checkInAll()">✓ 全員出席</button>
       </div>
     </div>
     <div id="checkin-grid">
       <div style="color:#bbb;font-size:13px;padding:12px 0">請先選擇課程和日期</div>
+    </div>
+    <!-- Action bar: shown after students rendered -->
+    <div class="checkin-action-bar" id="checkin-action-bar">
+      <div class="checkin-summary" id="checkin-summary">請勾選出席學員</div>
+      <button class="btn btn-green" onclick="commitCheckin()" id="btn-commit">✅ 完成報到</button>
+      <button class="btn btn-outline btn-sm" onclick="editCheckin()" id="btn-edit" style="display:none">✏️ 修正報到</button>
     </div>
   </div>
 
@@ -478,7 +581,31 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
       <button class="btn btn-red btn-sm" style="margin-left:auto" onclick="clearAll()">⚠ 清除所有資料</button>
     </div>
   </div>
-</div>
+
+  <!-- ── Password Change ── -->
+  <div class="admin-card" style="border-color:var(--lotus);border-width:1.5px">
+    <h3>🔑 修改管理員密碼</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:flex-end;flex-wrap:wrap" class="form-row">
+      <div class="form-group">
+        <label>現有密碼</label>
+        <input type="password" class="styled-input" id="pw-change-current" placeholder="現有密碼" style="width:100%">
+      </div>
+      <div class="form-group">
+        <label>新密碼</label>
+        <input type="password" class="styled-input" id="pw-change-new" placeholder="新密碼（至少4字元）" style="width:100%">
+      </div>
+      <div class="form-group">
+        <label>確認新密碼</label>
+        <input type="password" class="styled-input" id="pw-change-confirm" placeholder="再輸入一次" style="width:100%">
+      </div>
+      <button class="btn btn-primary" onclick="changeAdminPassword()">更新密碼</button>
+    </div>
+    <div id="pw-change-error" style="font-size:12px;color:var(--red);margin-top:8px;min-height:18px"></div>
+    <p style="font-size:11px;color:#bbb;margin-top:6px">預設密碼：<strong>tzu2026</strong>　密碼儲存於此瀏覽器，建議登入後立即修改。</p>
+  </div>
+
+  </div><!-- /admin-content -->
+</div><!-- /panel-admin -->
 
 <!-- ══ MODAL ══ -->
 <div class="modal-bg" id="modal-add-course">
@@ -1067,19 +1194,91 @@ function renderReport() {
 }
 
 // ════════════════════════════════════════════
-// ADMIN CHECK-IN  (課程為主 → 選日期 → 學員報到)
+// ADMIN PASSWORD
 // ════════════════════════════════════════════
+const DEFAULT_ADMIN_PASSWORD = 'tzu2026'; // 預設密碼
+let adminUnlocked = false;
 
-// Step 1: course selected → populate date dropdown
+function getAdminPassword() {
+  return localStorage.getItem('tzu_admin_pw') || DEFAULT_ADMIN_PASSWORD;
+}
+
+function requestAdminAccess(el) {
+  if (adminUnlocked) {
+    switchTab('admin', el);
+  } else {
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+    document.getElementById('panel-admin').classList.add('active');
+    el.classList.add('active');
+    document.getElementById('admin-lock').style.display = 'flex';
+    document.getElementById('admin-content').style.display = 'none';
+    document.getElementById('admin-pw-input').value = '';
+    document.getElementById('pw-error').textContent = '';
+    setTimeout(() => document.getElementById('admin-pw-input').focus(), 100);
+  }
+}
+
+function checkAdminPw() {
+  const pw = document.getElementById('admin-pw-input').value;
+  if (pw === getAdminPassword()) {
+    adminUnlocked = true;
+    document.getElementById('admin-lock').style.display = 'none';
+    document.getElementById('admin-content').style.display = 'block';
+    renderAdmin();
+    showToast('✓ 管理員登入成功');
+  } else {
+    document.getElementById('pw-error').textContent = '密碼錯誤，請重試';
+    document.getElementById('admin-pw-input').value = '';
+    document.getElementById('admin-pw-input').focus();
+  }
+}
+
+function lockAdmin() {
+  adminUnlocked = false;
+  document.getElementById('admin-lock').style.display = 'flex';
+  document.getElementById('admin-content').style.display = 'none';
+  document.getElementById('admin-pw-input').value = '';
+  document.getElementById('pw-error').textContent = '';
+  showToast('已登出管理員');
+}
+
+function changeAdminPassword() {
+  const current = document.getElementById('pw-change-current').value;
+  const newPw   = document.getElementById('pw-change-new').value.trim();
+  const confirm = document.getElementById('pw-change-confirm').value.trim();
+  const err     = document.getElementById('pw-change-error');
+
+  if (current !== getAdminPassword()) { err.textContent = '現有密碼不正確'; return; }
+  if (newPw.length < 4)               { err.textContent = '新密碼至少需要 4 個字元'; return; }
+  if (newPw !== confirm)              { err.textContent = '兩次輸入的新密碼不一致'; return; }
+
+  localStorage.setItem('tzu_admin_pw', newPw);
+  document.getElementById('pw-change-current').value = '';
+  document.getElementById('pw-change-new').value = '';
+  document.getElementById('pw-change-confirm').value = '';
+  err.textContent = '';
+  showToast('✅ 密碼已更新！下次登入請使用新密碼');
+}
+
+// ════════════════════════════════════════════
+// ADMIN CHECK-IN  (課程為主 → 選日期 → 學員報到)
+// Staging: changes held in memory until commitCheckin()
+// ════════════════════════════════════════════
+let checkinStaging = {}; // { studentId: bool } — temporary, not yet saved
+
 function renderCheckinDates() {
   const cid = document.getElementById('checkin-course').value;
   const dateSel = document.getElementById('checkin-date');
   const grid = document.getElementById('checkin-grid');
   const bulkBtns = document.getElementById('checkin-bulk-btns');
+  const actionBar = document.getElementById('checkin-action-bar');
 
   dateSel.innerHTML = '<option value="">-- 請選擇日期 --</option>';
   grid.innerHTML = '<div style="color:#bbb;font-size:13px;padding:12px 0">請選擇日期</div>';
   bulkBtns.style.display = 'none';
+  actionBar.classList.remove('visible');
+  checkinStaging = {};
 
   if (!cid) { dateSel.innerHTML = '<option value="">-- 請先選擇課程 --</option>'; return; }
 
@@ -1102,12 +1301,15 @@ function renderCheckinDates() {
   });
 }
 
-// Step 2: date selected → show all students as chips
 function renderCheckinStudents() {
   const cid = document.getElementById('checkin-course').value;
   const dateVal = document.getElementById('checkin-date').value;
   const grid = document.getElementById('checkin-grid');
   const bulkBtns = document.getElementById('checkin-bulk-btns');
+  const actionBar = document.getElementById('checkin-action-bar');
+
+  checkinStaging = {};
+  actionBar.classList.remove('visible');
 
   if (!cid || !dateVal) {
     grid.innerHTML = '<div style="color:#bbb;font-size:13px;padding:12px 0">請選擇課程和日期</div>';
@@ -1120,28 +1322,44 @@ function renderCheckinStudents() {
   const presetDef = (PRESET_DATES[cid]||{})[m]?.find(pd => pd.key === pdKey);
   if (!presetDef) return;
 
-  bulkBtns.style.display = 'flex';
+  // Init staging from saved state
+  state.students.forEach(s => {
+    checkinStaging[s.id] = !!(cell(s.id, cid, m).presets[pdKey]);
+  });
 
-  const confirmedCount = state.students.filter(s => !!(cell(s.id, cid, m).presets[pdKey])).length;
+  bulkBtns.style.display = 'flex';
+  actionBar.classList.add('visible');
+  document.getElementById('btn-commit').style.display = '';
+  document.getElementById('btn-edit').style.display = 'none';
+
+  _renderCheckinChips(cid, m, pdKey, presetDef, false);
+  _updateCheckinSummary();
+}
+
+function _renderCheckinChips(cid, m, pdKey, presetDef, locked) {
+  const grid = document.getElementById('checkin-grid');
+  const confirmedCount = Object.values(checkinStaging).filter(Boolean).length;
 
   let html = `
   <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span style="font-family:'Noto Serif TC',serif;font-size:14px;font-weight:600;color:var(--ink)">
       ${presetDef.label.replace('\n',' ')}
     </span>
-    <span style="font-size:12px;color:var(--check);font-weight:500">
-      已報到 ${confirmedCount} / ${state.students.length} 人
+    <span id="checkin-count-badge" style="font-size:12px;color:var(--check);font-weight:500">
+      已勾選 ${confirmedCount} / ${state.students.length} 人
     </span>
+    ${locked ? '<span style="font-size:11px;color:var(--lotus);background:var(--lotus-light);padding:2px 8px;border-radius:10px">已存檔</span>' : ''}
   </div>
   <div class="checkin-chips">`;
 
   state.students.forEach(s => {
-    const confirmed = !!(cell(s.id, cid, m).presets[pdKey]);
-    html += `<div class="checkin-chip${confirmed?' confirmed':''}"
-      onclick="toggleCheckinStudent('${s.id}','${cid}',${m},'${pdKey}',this)">
+    const confirmed = checkinStaging[s.id];
+    const lockedClass = locked ? ' locked' : '';
+    html += `<div class="checkin-chip${confirmed?' confirmed':''}${lockedClass}"
+      ${!locked ? `onclick="toggleCheckinStaging('${s.id}',this)"` : ''}>
       <span class="cc-dot"></span>
       <span class="cc-info">
-        <span class="cc-date" style="font-size:13px">${s.name.replace('師姊','')}<span style="font-size:10px;font-weight:400;color:inherit;opacity:0.7">師姊</span></span>
+        <span class="cc-date" style="font-size:13px">${s.name.replace('師姊','')}<span style="font-size:10px;font-weight:400;opacity:0.7">師姊</span></span>
         <span class="cc-course">${s.group} ｜ 組長：${s.leader||'—'}</span>
       </span>
       <span class="cc-check">✓</span>
@@ -1152,42 +1370,82 @@ function renderCheckinStudents() {
   grid.innerHTML = html;
 }
 
-function toggleCheckinStudent(sid, cid, m, key, el) {
-  const d = cell(sid, cid, m);
-  d.presets[key] = !d.presets[key];
-  saveCell(sid, cid, m, d);
-  el.classList.toggle('confirmed', d.presets[key]);
-  showToast(d.presets[key] ? `✓ ${state.students.find(s=>s.id===sid)?.name} 已報到` : '已取消報到');
-  // update count
-  const cid2 = document.getElementById('checkin-course').value;
-  const dateVal = document.getElementById('checkin-date').value;
-  if (cid2 && dateVal) {
-    const [mStr, pdKey] = dateVal.split('__');
-    const confirmedCount = state.students.filter(s => !!(cell(s.id, cid2, parseInt(mStr)).presets[pdKey])).length;
-    const countEl = document.querySelector('#checkin-grid span[style*="check"]');
-    if (countEl) countEl.textContent = `已報到 ${confirmedCount} / ${state.students.length} 人`;
-  }
+function _updateCheckinSummary() {
+  const confirmed = Object.values(checkinStaging).filter(Boolean).length;
+  const total = state.students.length;
+  const names = state.students.filter(s=>checkinStaging[s.id]).map(s=>s.name.replace('師姊','')).join('、');
+  document.getElementById('checkin-summary').innerHTML =
+    `已勾選 <strong>${confirmed}</strong> / ${total} 人${names ? `：${names}` : ''}`;
+  const badge = document.getElementById('checkin-count-badge');
+  if (badge) badge.textContent = `已勾選 ${confirmed} / ${total} 人`;
+}
+
+function toggleCheckinStaging(sid, el) {
+  checkinStaging[sid] = !checkinStaging[sid];
+  el.classList.toggle('confirmed', checkinStaging[sid]);
+  _updateCheckinSummary();
 }
 
 function checkInAll() {
+  state.students.forEach(s => { checkinStaging[s.id] = true; });
   const cid = document.getElementById('checkin-course').value;
   const dateVal = document.getElementById('checkin-date').value;
   if (!cid || !dateVal) return;
   const [mStr, pdKey] = dateVal.split('__');
   const m = parseInt(mStr);
+  const presetDef = (PRESET_DATES[cid]||{})[m]?.find(pd=>pd.key===pdKey);
+  _renderCheckinChips(cid, m, pdKey, presetDef, false);
+  _updateCheckinSummary();
+}
+
+function commitCheckin() {
+  const cid = document.getElementById('checkin-course').value;
+  const dateVal = document.getElementById('checkin-date').value;
+  if (!cid || !dateVal) return;
+  const [mStr, pdKey] = dateVal.split('__');
+  const m = parseInt(mStr);
+  const presetDef = (PRESET_DATES[cid]||{})[m]?.find(pd=>pd.key===pdKey);
+
+  // Write staging to state
   state.students.forEach(s => {
     const d = cell(s.id, cid, m);
-    d.presets[pdKey] = true;
+    d.presets[pdKey] = !!checkinStaging[s.id];
     saveCell(s.id, cid, m, d);
   });
-  renderCheckinStudents();
-  showToast(`✓ 已為全體 ${state.students.length} 位學員報到`);
+
+  // Lock chips, swap buttons
+  _renderCheckinChips(cid, m, pdKey, presetDef, true);
+  document.getElementById('btn-commit').style.display = 'none';
+  document.getElementById('btn-edit').style.display = '';
+  document.getElementById('checkin-bulk-btns').style.display = 'none';
+
+  const count = Object.values(checkinStaging).filter(Boolean).length;
+  document.getElementById('checkin-summary').innerHTML =
+    `✅ 報到完成，已為 <strong>${count}</strong> 位學員存檔`;
+  showToast(`✅ 報到完成，${count} 人已存檔`);
+}
+
+function editCheckin() {
+  const cid = document.getElementById('checkin-course').value;
+  const dateVal = document.getElementById('checkin-date').value;
+  if (!cid || !dateVal) return;
+  const [mStr, pdKey] = dateVal.split('__');
+  const m = parseInt(mStr);
+  const presetDef = (PRESET_DATES[cid]||{})[m]?.find(pd=>pd.key===pdKey);
+
+  // Unlock for editing
+  document.getElementById('btn-commit').style.display = '';
+  document.getElementById('btn-edit').style.display = 'none';
+  document.getElementById('checkin-bulk-btns').style.display = 'flex';
+  _renderCheckinChips(cid, m, pdKey, presetDef, false);
+  _updateCheckinSummary();
+  showToast('已進入修正模式，修改後請按「完成報到」存檔');
 }
 
 // ════════════════════════════════════════════
 // ADMIN
 // ════════════════════════════════════════════
-function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); renderCheckinDates(); }
+function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); }
 
 function renderStudentList() {
   const list = document.getElementById('student-list');
