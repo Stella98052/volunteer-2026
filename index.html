@@ -505,6 +505,14 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
     <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:11px" onclick="lockAdmin()">🔒 登出管理員</button>
   </div>
 
+  <!-- ── TBD Date Updates ── -->
+  <div class="admin-card" style="border-color:var(--gold);border-width:2px;margin-bottom:14px">
+    <h3>📅 待定日期更新 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（確認正式日期後，所有學員記錄表即時更新）</span></h3>
+    <div id="tbd-list">
+      <div style="color:#bbb;font-size:13px">載入中…</div>
+    </div>
+  </div>
+
   <!-- ── Admin Check-in ── -->
   <div class="admin-card" style="border-color:var(--gold);border-width:2px">
     <h3>✅ 管理員代為報到 <span style="font-size:11px;font-weight:400;color:var(--lotus)">（選課程 → 選日期 → 勾選學員 → 完成報到）</span></h3>
@@ -528,6 +536,7 @@ table.main-tbl th, table.main-tbl td { border: 1px solid #ddd8cc; }
     <div id="checkin-grid">
       <div style="color:#bbb;font-size:13px;padding:12px 0">請先選擇課程和日期</div>
     </div>
+    <div id="shared-date-manager"></div>
     <!-- Action bar: shown after students rendered -->
     <div class="checkin-action-bar" id="checkin-action-bar">
       <div class="checkin-summary" id="checkin-summary">請勾選出席學員</div>
@@ -778,7 +787,9 @@ const HARDCODED_BIN_ID = '69be97acb7ec241ddc8bfcc1'; // Stella's bin
 let BIN_ID  = HARDCODED_BIN_ID;
 let BIN_KEY = localStorage.getItem('tzu_bin_key') || '';
 
-let state = { students:[], globalCourses:[...DEFAULT_COURSES], attendance:{}, personalCourses:{} };
+let state = { students:[], globalCourses:[...DEFAULT_COURSES], attendance:{}, personalCourses:{}, sharedDates:{}, presetOverrides:{} };
+// sharedDates[cid][month] = [ { key, label } ]  — admin-added dates visible to all
+// presetOverrides[key] = newLabel  — admin override for TBD preset dates
 let syncTimer = null;
 let isSyncing = false;
 
@@ -803,7 +814,11 @@ async function loadState() {
       state = JSON.parse(s);
       if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
       if (!state.personalCourses) state.personalCourses = {};
+        if (!state.sharedDates) state.sharedDates = {};
+        if (!state.presetOverrides) state.presetOverrides = {};
       if (!state.attendance) state.attendance = {};
+      if (!state.sharedDates) state.sharedDates = {};
+        if (!state.presetOverrides) state.presetOverrides = {};
     }
   } catch(e) {}
 
@@ -821,6 +836,8 @@ async function loadState() {
         state = cloud;
         if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
         if (!state.personalCourses) state.personalCourses = {};
+        if (!state.sharedDates) state.sharedDates = {};
+        if (!state.presetOverrides) state.presetOverrides = {};
         if (!state.attendance) state.attendance = {};
         localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
         setSyncStatus('✓ 已同步', true);
@@ -881,10 +898,12 @@ async function pushToCloud() {
             merged.personalCourses[sid] = state.personalCourses[sid];
           });
         }
-        // Admin only: sync students list and globalCourses
+        // Admin only: sync students list, globalCourses, sharedDates, presetOverrides
         if (BIN_KEY) {
           merged.students = state.students;
           merged.globalCourses = state.globalCourses;
+          merged.sharedDates = state.sharedDates;
+          merged.presetOverrides = state.presetOverrides;
         }
         state = merged;
         localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
@@ -922,6 +941,8 @@ async function manualSync() {
         state = cloud;
         if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
         if (!state.personalCourses) state.personalCourses = {};
+        if (!state.sharedDates) state.sharedDates = {};
+        if (!state.presetOverrides) state.presetOverrides = {};
         if (!state.attendance) state.attendance = {};
         localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
         syncSelects();
@@ -960,6 +981,34 @@ async function createNewBin(masterKey) {
 }
 
 function genId() { return 'u'+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+
+// Get all dates for a course+month: presets (with overrides applied) + admin sharedDates
+function getCourseDates(cid, m) {
+  const presets = ((PRESET_DATES[cid]||{})[m] || []).map(pd => {
+    // Apply admin override if exists
+    const override = (state.presetOverrides||{})[pd.key];
+    return override ? { ...pd, label: override, overridden: true } : pd;
+  });
+  const shared = (state.sharedDates[cid]||{})[m] || [];
+  return [...presets, ...shared];
+}
+
+// Get all TBD presets across all courses (for admin to update)
+function getTBDPresets() {
+  const tbd = [];
+  Object.entries(PRESET_DATES).forEach(([cid, months]) => {
+    const course = DEFAULT_COURSES.find(c => c.id === cid);
+    Object.entries(months).forEach(([m, pds]) => {
+      pds.forEach(pd => {
+        if (pd.label.includes('待定')) {
+          const override = (state.presetOverrides||{})[pd.key];
+          tbd.push({ cid, courseName: course?.name||cid, m: parseInt(m), pd, override });
+        }
+      });
+    });
+  });
+  return tbd;
+}
 
 // Cell accessor — always returns { presets:{}, custom:[] }
 function cell(sid, cid, m) {
@@ -1002,13 +1051,12 @@ function syncSelects() {
     sel.innerHTML = '<option value="">-- 請選擇學員 --</option>' +
       state.students.map(s=>`<option value="${s.id}" ${s.id===cur?'selected':''}>${s.name}｜${s.group}｜組長:${s.leader||'—'}</option>`).join('');
   });
-  // Populate checkin course dropdown
+  // Populate checkin course dropdown — show ALL courses
   const cc = document.getElementById('checkin-course');
   if (cc) {
     const cur = cc.value;
-    const coursesWithPresets = state.globalCourses.filter(c => Object.keys(PRESET_DATES[c.id]||{}).length > 0);
     cc.innerHTML = '<option value="">-- 請選擇課程 --</option>' +
-      coursesWithPresets.map(c=>`<option value="${c.id}" ${c.id===cur?'selected':''}>${c.name}</option>`).join('');
+      state.globalCourses.map(c=>`<option value="${c.id}" ${c.id===cur?'selected':''}>${c.name}</option>`).join('');
   }
 }
 
@@ -1037,20 +1085,17 @@ function renderAttendance() {
   let personalConf = 0; // 自選課程出席堂數（個人課程列 + 所有列的自填日期）
 
   courses.forEach(c => {
-    const presetDefs = PRESET_DATES[c.id] || {};
     MONTHS.forEach(m => {
       const d = cell(sid, c.id, m);
-      const monthPresets = (presetDefs[m] || []);
+      const monthDates = getCourseDates(c.id, m); // presets + sharedDates
 
       if (personalCourseIds.has(c.id)) {
-        // Personal course row: everything counts as personal
         personalConf += Object.values(d.presets).filter(Boolean).length;
         personalConf += d.custom.filter(x=>x.confirmed).length;
       } else {
-        // Scheduled course row
-        schedTotal += monthPresets.length;                                    // total preset slots
-        schedConf  += monthPresets.filter(pd => d.presets[pd.key]).length;   // confirmed presets only
-        personalConf += d.custom.filter(x=>x.confirmed).length;              // self-added dates → personal bucket
+        schedTotal   += monthDates.length;
+        schedConf    += monthDates.filter(pd => d.presets[pd.key]).length;
+        personalConf += d.custom.filter(x=>x.confirmed).length;
       }
     });
   });
@@ -1083,7 +1128,7 @@ function renderAttendance() {
 
     MONTHS.forEach(m => {
       const d = cell(sid, c.id, m);
-      const presetDefs = (PRESET_DATES[c.id]||{})[m] || [];
+      const presetDefs = getCourseDates(c.id, m);
 
       html += `<td class="month-cell">`;
 
@@ -1460,8 +1505,149 @@ function changeAdminPassword() {
   showToast('✅ 密碼已更新！下次登入請使用新密碼');
 }
 
+// ── Shared date manager (shown below course selector) ──
+function renderSharedDateManager(cid) {
+  const el = document.getElementById('shared-date-manager');
+  if (!el) return;
+  const course = state.globalCourses.find(c => c.id === cid);
+  if (!cid || !course) { el.innerHTML = ''; return; }
+
+  // List existing shared dates for this course
+  const allShared = [];
+  MONTHS.forEach(m => {
+    ((state.sharedDates[cid]||{})[m]||[]).forEach(pd => allShared.push({ m, pd }));
+  });
+
+  let html = `<div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--mist)">
+    <div style="font-size:12px;font-weight:600;color:var(--ink-light);margin-bottom:8px">
+      📅 ${course.name} — 共用日期管理
+      <span style="font-weight:400;color:#bbb">（新增後所有學員可見，可在此簽到）</span>
+    </div>`;
+
+  // Existing shared dates
+  if (allShared.length > 0) {
+    html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">`;
+    allShared.forEach(({ m, pd }) => {
+      html += `<div style="display:flex;align-items:center;gap:4px;background:var(--gold-light);border:1px solid var(--gold);border-radius:6px;padding:3px 8px;font-size:12px">
+        <span>${pd.label.replace('\n',' ')}</span>
+        <button onclick="removeSharedDate('${cid}',${m},'${pd.key}')"
+          style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px;padding:0 2px">✕</button>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Add new shared date
+  html += `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+    <div style="display:flex;flex-direction:column;gap:3px">
+      <label style="font-size:11px;color:var(--ink-light)">月份</label>
+      <select class="styled-select" id="shared-month-sel" style="width:80px">
+        ${MONTHS.map(m=>`<option value="${m}">${MONTHS_ZH[m]}</option>`).join('')}
+      </select>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:140px">
+      <label style="font-size:11px;color:var(--ink-light)">日期／活動名稱</label>
+      <input class="styled-input" id="shared-date-input" placeholder="如 5/3(六) 環保日" style="width:100%">
+    </div>
+    <button class="btn btn-gold btn-sm" onclick="addSharedDate('${cid}')">＋ 新增共用日期</button>
+  </div></div>`;
+
+  el.innerHTML = html;
+}
+
+function addSharedDate(cid) {
+  const m = parseInt(document.getElementById('shared-month-sel').value);
+  const label = document.getElementById('shared-date-input').value.trim();
+  if (!label) { showToast('請輸入日期名稱'); return; }
+
+  if (!state.sharedDates[cid]) state.sharedDates[cid] = {};
+  if (!state.sharedDates[cid][m]) state.sharedDates[cid][m] = [];
+
+  const key = `sh_${cid}_${m}_${Date.now()}`;
+  state.sharedDates[cid][m].push({ key, label });
+  saveState();
+  document.getElementById('shared-date-input').value = '';
+  renderCheckinDates(); // refresh dropdown
+  showToast(`✅ 已新增共用日期：${label}（所有學員可見）`);
+}
+
+function removeSharedDate(cid, m, key) {
+  if (!state.sharedDates[cid]?.[m]) return;
+  state.sharedDates[cid][m] = state.sharedDates[cid][m].filter(pd => pd.key !== key);
+  saveState();
+  renderCheckinDates();
+  showToast('已移除共用日期');
+}
+
 // ════════════════════════════════════════════
-// ADMIN CHECK-IN  (課程為主 → 選日期 → 學員報到)
+// TBD DATE MANAGEMENT
+// ════════════════════════════════════════════
+function renderTBDList() {
+  const el = document.getElementById('tbd-list');
+  if (!el) return;
+  const tbds = getTBDPresets();
+  if (tbds.length === 0) {
+    el.innerHTML = '<div style="color:var(--check);font-size:13px">✅ 目前沒有待定日期</div>';
+    return;
+  }
+  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  tbds.forEach(({ cid, courseName, m, pd, override }) => {
+    const isSet = !!override;
+    html += `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+        padding:10px 14px;border-radius:9px;
+        background:${isSet?'var(--check-light)':'var(--gold-light)'};
+        border:1px solid ${isSet?'var(--check)':'var(--gold)'}">
+      <div style="min-width:160px">
+        <div style="font-weight:600;font-size:13px;color:var(--ink)">${courseName}</div>
+        <div style="font-size:11px;color:var(--lotus)">${MONTHS_ZH[m]}</div>
+      </div>
+      <div style="flex:1;min-width:120px">
+        <div style="font-size:11px;color:#aaa;margin-bottom:2px">目前顯示</div>
+        <div style="font-size:13px;font-weight:500;color:${isSet?'var(--check)':'var(--red)'}">
+          ${isSet ? override.replace('\n',' ')+' ✓' : pd.label.replace('\n',' ')+' （待定）'}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input class="styled-input" id="tbd-input-${pd.key}"
+          placeholder="輸入正式日期，如 4/19(日)"
+          value="${isSet ? override.split('\n')[0] : ''}"
+          style="width:160px;font-size:12px"
+          onkeydown="if(event.key==='Enter')setPresetDate('${pd.key}','${cid}',${m})">
+        <button class="btn btn-primary btn-sm" onclick="setPresetDate('${pd.key}','${cid}',${m})">${isSet?'更新':'確認日期'}</button>
+        ${isSet?`<button class="btn btn-outline btn-sm" onclick="clearPresetOverride('${pd.key}')">恢復待定</button>`:''}
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function setPresetDate(key, cid, m) {
+  const input = document.getElementById('tbd-input-' + key);
+  const val = input?.value.trim();
+  if (!val) { showToast('請輸入正式日期'); return; }
+  const origPd = ((PRESET_DATES[cid]||{})[m]||[]).find(pd => pd.key === key);
+  const origLines = origPd?.label.split('\n') || [];
+  const newLabel = origLines.length > 1 ? `${val}\n${origLines[1]}` : val;
+  if (!state.presetOverrides) state.presetOverrides = {};
+  state.presetOverrides[key] = newLabel;
+  saveState();
+  renderTBDList();
+  const sid = document.getElementById('student-select')?.value;
+  if (sid) renderAttendance();
+  showToast(`✅ 已更新：${val}（所有學員記錄表即時更新）`);
+}
+
+function clearPresetOverride(key) {
+  if (!confirm('恢復為「待定」狀態？')) return;
+  delete state.presetOverrides[key];
+  saveState();
+  renderTBDList();
+  const sid = document.getElementById('student-select')?.value;
+  if (sid) renderAttendance();
+  showToast('已恢復待定狀態');
+}
+
 // Staging: changes held in memory until commitCheckin()
 // ════════════════════════════════════════════
 let checkinStaging = {}; // { studentId: bool } — temporary, not yet saved
@@ -1481,23 +1667,30 @@ function renderCheckinDates() {
 
   if (!cid) { dateSel.innerHTML = '<option value="">-- 請先選擇課程 --</option>'; return; }
 
-  const presetsByMonth = PRESET_DATES[cid] || {};
-  const allPresets = [];
+  // All dates = presets + admin sharedDates
+  const allDates = [];
   MONTHS.forEach(m => {
-    (presetsByMonth[m] || []).forEach(pd => allPresets.push({ m, pd }));
+    getCourseDates(cid, m).forEach(pd => allDates.push({ m, pd }));
   });
 
-  if (allPresets.length === 0) {
-    dateSel.innerHTML = '<option value="">（此課程無預設日期）</option>';
-    return;
+  // Populate date dropdown
+  if (allDates.length > 0) {
+    allDates.forEach(({ m, pd }) => {
+      const opt = document.createElement('option');
+      opt.value = `${m}__${pd.key}`;
+      opt.textContent = pd.label.replace('\n', ' ');
+      dateSel.appendChild(opt);
+    });
   }
 
-  allPresets.forEach(({ m, pd }) => {
-    const opt = document.createElement('option');
-    opt.value = `${m}__${pd.key}`;
-    opt.textContent = pd.label.replace('\n', ' ');
-    dateSel.appendChild(opt);
-  });
+  // Always show "add shared date" option for admin
+  const addOpt = document.createElement('option');
+  addOpt.value = '__add_new__';
+  addOpt.textContent = '＋ 新增共用日期…';
+  dateSel.appendChild(addOpt);
+
+  // Show shared date manager below
+  renderSharedDateManager(cid);
 }
 
 function renderCheckinStudents() {
@@ -1510,6 +1703,15 @@ function renderCheckinStudents() {
   checkinStaging = {};
   actionBar.classList.remove('visible');
 
+  if (dateVal === '__add_new__') {
+    // Focus on the add-shared-date input
+    document.getElementById('shared-date-input')?.focus();
+    grid.innerHTML = '<div style="color:var(--lotus);font-size:13px;padding:8px 0">請在下方輸入新日期後按「新增」</div>';
+    bulkBtns.style.display = 'none';
+    document.getElementById('checkin-date').value = '';
+    return;
+  }
+
   if (!cid || !dateVal) {
     grid.innerHTML = '<div style="color:#bbb;font-size:13px;padding:12px 0">請選擇課程和日期</div>';
     bulkBtns.style.display = 'none';
@@ -1518,7 +1720,9 @@ function renderCheckinStudents() {
 
   const [mStr, pdKey] = dateVal.split('__');
   const m = parseInt(mStr);
-  const presetDef = (PRESET_DATES[cid]||{})[m]?.find(pd => pd.key === pdKey);
+  // Look up in both presets and sharedDates
+  const allDates = getCourseDates(cid, m);
+  const presetDef = allDates.find(pd => pd.key === pdKey);
   if (!presetDef) return;
 
   // Init staging from saved state
@@ -1644,7 +1848,7 @@ function editCheckin() {
 // ════════════════════════════════════════════
 // ADMIN
 // ════════════════════════════════════════════
-function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); renderCloudStatus(); }
+function renderAdmin() { syncSelects(); renderStudentList(); renderCourseList(); renderCloudStatus(); renderTBDList(); }
 
 function renderStudentList() {
   const list = document.getElementById('student-list');
@@ -1821,6 +2025,8 @@ async function manualSync() {
         state = cloud;
         if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
         if (!state.personalCourses) state.personalCourses = {};
+        if (!state.sharedDates) state.sharedDates = {};
+        if (!state.presetOverrides) state.presetOverrides = {};
         if (!state.attendance) state.attendance = {};
         localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
         syncSelects();
@@ -1858,6 +2064,8 @@ async function manualSync() {
           state = cloud;
           if (!state.globalCourses?.length) state.globalCourses = [...DEFAULT_COURSES];
           if (!state.personalCourses) state.personalCourses = {};
+        if (!state.sharedDates) state.sharedDates = {};
+        if (!state.presetOverrides) state.presetOverrides = {};
           if (!state.attendance) state.attendance = {};
           localStorage.setItem('tzu_chi_2026_v5', JSON.stringify(state));
           syncSelects();
