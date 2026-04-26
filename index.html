@@ -1123,7 +1123,14 @@ function renderAttendance() {
   courses.forEach(c => {
     const isPersonal = !!(state.personalCourses[sid]||[]).find(p=>p.id===c.id);
     html += `<tr class="course-row${isPersonal?' custom-row':''}">
-      <td class="col-item">${c.name}${c.note?`<br><span style="font-size:9px;color:var(--lotus);font-weight:400">${c.note}</span>`:''}</td>
+      <td class="col-item">
+        ${c.name}${c.note?`<br><span style="font-size:9px;color:var(--lotus);font-weight:400">${c.note}</span>`:''}
+        ${isPersonal ? `<br><button onclick="deletePersonalCourse('${sid}','${c.id}')"
+          style="margin-top:4px;font-size:10px;padding:2px 7px;border:1px solid var(--red);
+          border-radius:4px;background:white;color:var(--red);cursor:pointer;
+          line-height:1.4;font-family:'Noto Sans TC',sans-serif"
+          title="刪除此自選課程">✕ 刪除</button>` : ''}
+      </td>
       <td class="col-group">${c.group||''}</td>`;
 
     MONTHS.forEach(m => {
@@ -1930,6 +1937,19 @@ function addPersonalCourse() {
   document.getElementById('modal-course-group').value='';
   renderAttendance();
   showToast('已新增個人課程：'+name);
+}
+
+function deletePersonalCourse(sid, cid) {
+  const course = (state.personalCourses[sid]||[]).find(c => c.id === cid);
+  if (!course) return;
+  if (!confirm(`確定刪除自選課程「${course.name}」？\n已記錄的出席資料也會一併刪除。`)) return;
+  // Remove course from personalCourses
+  state.personalCourses[sid] = (state.personalCourses[sid]||[]).filter(c => c.id !== cid);
+  // Remove attendance data for this course
+  if (state.attendance[sid]) delete state.attendance[sid][cid];
+  saveState();
+  renderAttendance();
+  showToast(`已刪除自選課程：${course.name}`);
 }
 
 // ════════════════════════════════════════════
